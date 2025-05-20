@@ -1,0 +1,4 @@
+build/*
+dist/*
+FOCCUS_Shom.egg-info/*
+
