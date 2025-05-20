@@ -183,7 +183,7 @@ def convert_ens025(dir_in, dates=None, varList=None, fileOUT=None, ens=False):
         print("STOP -- Should be in a dictionary format (see description).")
         return
     
-    #-- check time period to consider, extract nane of associated sub-directories --
+    #-- check time period to consider, extract name of associated sub-directories --
     if dates is None: 
         print("STOP -- Please provide dates in a dictionary.")
         return
@@ -213,7 +213,7 @@ def convert_ens025(dir_in, dates=None, varList=None, fileOUT=None, ens=False):
     #
     [nz, ny, nx] = [tmp.dims["deptht"], len(latitude), len(longitude)]
     
-    #-- construct assiated land/ocean mask --
+    #-- construct associated land/ocean mask --
     print("-- Generate 3D land/ocean mask on regular grid --")
     msk = xr.where(tmp.thetao.isel(time_counter=0) > 0, 1., 0.)
     msk = eval("msk.stack(yx=('%s', '%s'))" % (varList['y'], varList['x']) )
@@ -242,7 +242,7 @@ def convert_ens025(dir_in, dates=None, varList=None, fileOUT=None, ens=False):
         # Interpolate on regular grid
         #----------------------------
         
-        #-- get number of time frame and file extension assiated with their dates --
+        #-- get number of time frame and file extension associated with their dates --
         tmplist = sorted(glob.glob("%s/mem000/*%s*.nc" % (idir, varList['thetao'])))
         nfile   = len(tmplist)
         
