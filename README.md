@@ -8,7 +8,7 @@ Softwares developped and used at Shom in the context of the Horizon Europe FOCCU
 python setup.py install --user
 ```
 
-# Test case: the global $\nicefrac{1}{4}^{\circ}$ ensemble simulation GLO4ens
+# Test case: the global $\frac{1}{4}^{\circ}$ ensemble simulation GLO4ens
 
 ## Step-by-step procedure
 
