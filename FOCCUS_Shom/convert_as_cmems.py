@@ -6,36 +6,97 @@ import datetime
 import os
 import glob
 from scipy.interpolate import griddata
+import json
 
 
+#########################
+def read_params(filename):
+    '''
+    Decode input parameters from json file.
+    '''
+    with open(filename, "r") as jsonfile:
+        params = json.load(jsonfile)
+    var_info  = params["var_info"]
+    date_info = params["date_info"]
+    ens_info  = params["ens_info"]
+    dir_info  = params["dir_info"]  
 
-################################
-def generate_dir_list(dir_in, start_date, end_date):
-    months = []
-    current_date = start_date
-    
-    while current_date <= end_date:
-        months.append("%s/%s" % (dir_in, current_date.strftime("%Y/%m")) )  # Format: 'YYYY/MM'
-        # move to first day of next month
-        if current_date.month == 12:
-            current_date = current_date.replace(year=current_date.year + 1, month=1)
-        else:
-            current_date = current_date.replace(month=current_date.month + 1)
-    
-    #-- The end! --
-    return months
-
+    return var_info, date_info, ens_info, dir_info
 
 ################################
-def create_dataset(depth, lat, lon, attrs_his, nmem=0, nt=1):
+def date_range_list(date_info):
+    '''
+    Return list of datetime.date objects (inclusive) between start_date and end_date (inclusive).
+    '''
+    
+    start_date = datetime.date(date_info['yr_ini'], date_info['mth_ini'], date_info['day_ini'])
+    end_date   = datetime.date(date_info['yr_end'], date_info['mth_end'], date_info['day_end'])
+    step       = date_info['step']
+    
+    date_list = []
+    curr_date = start_date
+    while curr_date <= end_date:
+        date_list.append(curr_date)
+        curr_date += datetime.timedelta(days=step)
+    return date_list
+
+
+########################################
+def make_regular_mesh(da, var_info):
+    '''
+    Generate a regulat lon/lon mesh and associated mask based on temperature field.
+    '''
+
+    print("-- Define regular lat/lon grid --")
+    dlon = eval("(da.%s[:, 1:]-da.%s[:, :-1]).mean().data" % \
+                (var_info['longitude'], var_info['longitude']) )
+    dlat = eval("(da.%s[1:, :]-da.%s[:-1, :]).mean().data" % \
+                (var_info['latitude'], var_info['latitude']) )
+    lon = eval("np.arange(da.%s.min(), da.%s.max()+dlon, dlon)" % \
+                (var_info['longitude'], var_info['longitude']) )
+    lat = eval("np.arange(da.%s.min(), da.%s.max()+dlat, dlat)" % \
+                (var_info['latitude'], var_info['latitude']) )
+    depth = eval("da.%s.data" % (var_info['z']) )
+    #
+    [nz, ny, nx] = [da.dims[var_info['z']], len(lat), len(lon)]
+
+    #-- construct associated land/ocean mask --
+    print("-- Generate 3D land/ocean mask on regular grid --")
+    msk = eval("xr.where(da.%s.isel(%s=0) > 0, 1., 0.)" % (var_info['thetao'], var_info['time'] ))
+    msk = eval("msk.stack(yx=('%s', '%s'))" % (var_info['y'], var_info['x']) )
+    msk_reg = np.zeros([nz, ny, nx])
+    for kkk in range(nz):
+        msk_reg[kkk, ...] = eval("griddata((msk.%s, msk.%s), msk[kkk, :], (lon[None, :], lat[:, None]), method='nearest')" %
+                                 (var_info['longitude'], var_info['latitude']) )
+    msk_reg = np.where(msk_reg > 0.999, 1., np.nan)
+
+    return lat, lon, depth, msk_reg
+
+
+#############################################################
+def create_dataset(dir_info, var_info, ens_info, nt=1):
+    '''
+    Create a CMEMS-like dataset on a regular lat/lon grid.
+    '''
+
+    #-- temporary temperature dataarray used to construct mask --
+    filelist = sorted( glob.glob("%s/*%s*" % (dir_info["dir_in"], var_info['thetao']) ) )
+    tmp = xr.open_dataset(filelist[0])
+
+    #-- extract attributrs history --
+    attrs_his = tmp.attrs['history']
+
+    #-- make regular lat/lon mesh and mask --
+    [lat, lon, depth, mask] = make_regular_mesh(tmp, var_info)
 
     #-- get dimensions and mesh --
     [nz, ny, nx] = [len(depth), len(lat), len(lon)]
-    [e2t, e1t]   = [lat[1]-lat[0], lon[0]-lon[1]]
-    ens=False
-    if nmem>0: ens=True
-    
-    if ens:
+    [dlat, dlon]   = [lat[1]-lat[0], lon[0]-lon[1]]
+   
+    if ens_info["ens_in"] and ens_info["ens_out"]:
+        nmem = len(ens_info["number"])
+
+    if ens_info["ens_out"]:
         variables=dict(
                 zos=(["number", "time", "latitude", "longitude"], np.zeros([nmem, nt, ny, nx])),
                 uo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
@@ -44,11 +105,11 @@ def create_dataset(depth, lat, lon, attrs_his, nmem=0, nt=1):
                 so=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
             )
         coordinates=dict(
-             number=np.arange(nmem).astype('int16'),
-             time=np.zeros(nt).astype('float'),
              depth=depth.astype('float'),
-             longitude=lon.astype('float'),
              latitude=lat.astype('float'),
+             longitude=lon.astype('float'),
+             time=np.zeros(nt).astype('float'),
+             number=ens_info["number"].astype('int16'),
          )
     else:
         variables=dict(
@@ -59,16 +120,16 @@ def create_dataset(depth, lat, lon, attrs_his, nmem=0, nt=1):
                 so=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
             )
         coordinates=dict(
-             time=np.zeros(nt).astype('float'),
              depth=depth.astype('float'),
-             longitude=lon.astype('float'),
              latitude=lat.astype('float'),
+             longitude=lon.astype('float'),
+             time=np.zeros(nt).astype('float'),
          )
 
     #-- create dataset --
     ds = xr.Dataset(
-        data_vars=variables,
         coords=coordinates,
+        data_vars=variables,
         attrs=dict(title='Hourly mean fields from Ensemble Global Ocean Physics Analysis ',
                    comments='Retrieve from Mercator Ocean International ftp',
                    history=[attrs_his, \
@@ -80,9 +141,12 @@ def create_dataset(depth, lat, lon, attrs_his, nmem=0, nt=1):
                    Conventions='CF-1.6',
                )
     )
+   
+    #-- add land/ocean mask --
+    ds["mask"] = (["depth", "latitude", "longitude"], mask)
     
-    # variables attributes
-    if ens:
+    #-- variables attributes --
+    if ens_info["ens_out"]:
         ds.number.attrs      = {'long_name': 'ensemble member numerical id',
                             'units': '1',
                             'standard_name': 'realization'}
@@ -92,22 +156,22 @@ def create_dataset(depth, lat, lon, attrs_his, nmem=0, nt=1):
                          'standard_name': 'depth',
                          'unit_long': 'Meters',
                          'units': 'm'}
-    ds.longitude.attrs   = {'axis': 'X',
-                        'long_name': 'Longitude',
-                        'standard_name': 'longitude',
-                        'unit_long': 'Degrees East',
-                        'units': 'degrees_east',
-                        'step': e1t,
-                        'valid_max': lon.max(),
-                        'valid_min': lon.min()}
     ds.latitude.attrs    = {'axis': 'Y',
                         'long_name': 'Latitude',
                         'standard_name': 'latitude',
                         'unit_long': 'Degrees North',
                         'units': 'degrees_north',
-                        'step': e2t,
+                        'step': dlat,
                         'valid_max': lat.max(),
                         'valid_min': lat.min()}
+    ds.longitude.attrs   = {'axis': 'X',
+                        'long_name': 'Longitude',
+                        'standard_name': 'longitude',
+                        'unit_long': 'Degrees East',
+                        'units': 'degrees_east',
+                        'step': dlon,
+                        'valid_max': lon.max(),
+                        'valid_min': lon.min()}
     ds.zos.attrs         = {'cell_methods': 'area: mean',
                        'long_name': 'Sea surface height',
                        'standard_name': 'sea_surface_height_above_geoid',
@@ -138,25 +202,37 @@ def create_dataset(depth, lat, lon, attrs_his, nmem=0, nt=1):
     #-- The end! --
     return ds
 
+
+
 ################################
-def convert_ens025(dir_in, dates=None, varList=None, fileOUT=None, ens=False):
+#def convert_to_cmems_type(dir_info, date_info=None, ens_info=dict({"ens_in":False, "ens_out":False, "number": None}), var_info=None):
+def convert_to_cmems_type(filename):
     '''
-    Reorganize ORCA025 ensemble simulation from Mercator Ocean following CMEMS convention.
-    Data have been retrieved on the native NEMO grid, with one file per 3D variables (SSH is in a file with other 2D variables (e.g. air-sea fluxes)),
-    and one file per ensemble memeber and per daily averaged output.
-    This script interpolates all variables on regular grid, lump ensemble members within the same netcdf file and rename some variables following CMEMS convention.
+    Reorganize and interpolate input dataset to a CMEMS-like dataset, i.e. all variables are intrpolated on a regular, non-staggered latitude/longitude grid with conventional variable names.
+    This script assumes an input dataset with one file per variables (i.e. ssh, temperature, salinity, zonal and meridional velocity), per model output dump (i.e. no time dimension in the original dataset), and in the case of ensemble simulations one file per ensemble member.
+    Input file names should be in form 'XXXnyname*VARIABLE*_YYYYMMDD-YYYYMMDD*.nc', with XXX the ensemble member number, VARIABLE the name of the variable (see var_info), YYYYMMDD the date.
+    In case of ensemble, the resulting CMEMS-like output dataset can either be saved with one netcdf file per ensemble member (i.e. ens_info["ens_out"] == False, default), 
+    or one netcdf file with all ensemble members (i.e. ens_info["ens_out"] == True) with 'number' as the 
     
-    Input:
-        - dir_in: the directory where to load original data. 
-                  Assumes data are organized as: ${dir_in}/yyyy/mm/memXXX/
-                  and each variables are stores into a dedicated file in the format *thetao*YYYYMMDD-YYYYMMDD.nc
-        - dates: dictionary with initial and final dates (i.e. [month, year]) to consider, for directory scanning.
-                Should be in the format: dates = dict({"yr_ini": YYYY, "mth_ini": MM, "yr_end": YYYY, "mth_end": MM})
-        - varList: List of variable names associated with temperature ('thetao'), salinity ('so'), 
+    Input: 
+    - filename: J[A]SON file containing the following parameters: 
+        - dir_info: Input, Output and scratch directories informations, as well as output filename.
+		To be provided in a dictionary format: dir_info = dict({"dir_in": '/my/directory/with/original/dataset/',
+                                                                        "dir_out": 'my/directory/where/to/store/data/',
+                                                                        "fileN": filename.nc).
+		Assumes all data are directly accessible from "dir_in" by their file name, no sub-directories.
+        - date_info: information on initial and final dates (i.e. [year, month, day]) to consider, and the time stepping increment (in days).
+                To be provided in a dictionary format: date_info = dict({"yr_ini": YYYY, "mth_ini": MM, "day_ini": DD, "yr_end": YYYY, "mth_end": MM, "day_end": DD, "step": X})
+        - ens_info: information on the type of input and output dataset (ensemble or single run), how to handle it in the output netcdf file, and the number of ensemble members in the input dataset, if necessary.
+		To be provided in a dictionary format: ens_info = dict({"ens_in": True/False, "ens_out": True/False, "number": np.arange(nmem)}), with 'nmem' the number of ensemble members.
+		If ens_info["ens_in"] ==  True and ens_info["ens_out"] == False, one netcdf file per ensemble member will be written out.
+		If end_info["ens_in"] ==  True and ens_info["ens_out"] == True , ensemble memebers are agredated within the same netcdf file.
+                'number' refers to the list of ensemble members IN THE INPUT DATASET to consider (can either be continuous, e.g. number=np.arange(10), or discontinuous, e.g. number=[2, 5, 10])
+        - var_info: List of variable names associated with temperature ('thetao'), salinity ('so'), 
                     zonal ('uo') and meridional ('vo') velocity, sea surface elevation ('zos'), 
                     time, longitude, latitude, x and y grid index.
                 Should be in the format: 
-                varList = dict({"thetao": "",
+                var_info = dict({"thetao": "",
                                 "so": "", 
                                 "uo": "", 
                                 "vo": "", 
@@ -173,187 +249,171 @@ def convert_ens025(dir_in, dates=None, varList=None, fileOUT=None, ens=False):
                                 "x_v": "",
                                 "y_v": "",
                                 "z_v": "",})
-	- ens: If True, create one output file containing all ensemble members.
-               If False (default), create one output file per ensemble member.
+
+    Note: As for now (08/08/2025), uo and vo coordinates are referred to with the same name (nav_lon, nav_lat) than tracer. Opening with xr.open_mfdataset all variables at once require overriding coordinates, resulting in a loss of information needed for interpolation. Each variables are thus treated separately.
     '''
-    
+ 
+    #-- Read parameters from json file --
+    [var_info, date_info, ens_info, dir_info] = read_params(filename)   
+
+ 
     #-- check the type of data and associated list of variables --
-    if varList is None:
+    if var_info is None:
         print("STOP -- Please provide the name of variables associated to the type of data to load.")
         print("STOP -- Should be in a dictionary format (see description).")
         return
+
     
-    #-- check time period to consider, extract name of associated sub-directories --
-    if dates is None: 
+    #-- check time period to consider and generate list of dates to consider --
+    if date_info is None: 
         print("STOP -- Please provide dates in a dictionary.")
         return
-    if (datetime.datetime(dates['yr_end'], dates['mth_end'], 1, 0, 0).toordinal() - datetime.datetime(dates['yr_ini'], dates['mth_ini'], 1, 0, 0).toordinal()) < 0:
-        print("-- End date (%04.i/%02.i) is prior to start date (%04.i/%02.i) -- Please provide time increasing dates." % (dates['yr_end'], dates['mth_end'], dates['yr_ini'], dates['mth_ini']))
+    if (datetime.datetime(date_info['yr_end'], date_info['mth_end'], date_info['day_end']).toordinal() - datetime.datetime(date_info['yr_ini'], date_info['mth_ini'], date_info['day_ini']).toordinal()) < 0:
+        print("-- End date (%04.i/%02.i/02.i) is prior to start date (%04.i/%02.i/%02.i) -- Please provide time increasing dates." % (date_info['yr_end'], date_info['mth_end'], date_info['day_end'], date_info['yr_ini'], date_info['mth_ini'], date_info['day_in']))
         return
-    dir_list = generate_dir_list(dir_in, datetime.date(dates['yr_ini'], dates['mth_ini'], 1), datetime.date(dates['yr_end'], dates['mth_end'], 1))
-    for idir in dir_list:
-        if not os.path.isdir(idir):
-            print("!!! Directory %s not found !!!" % idir )
-            return
-        
+    #
+    date_list = date_range_list(date_info)    
+
+
     #-- check output file name --
-    if fileOUT is None:
-        print("STOP -- Please provide a prefix for output file names")
+    if dir_info is None:
+        print("STOP -- Please provide necessary informations on directories and output netcdf file (see description for details).")
         return
+   
+    #-- check and extract ensemble informations --
+    if ens_info["ens_in"]:
+        if ens_info["number"] is None:
+            print("STOP -- Please provide ensemble members numbers")
+            return
+        else:
+            nmem = len(ens_info["number"])
+    else:
+        ens_info["ens_out"] = False     # to insure consistancy between input and outputs 
+
+    #-- initiate xarray dataset for output --
+    ds = create_dataset(dir_info, var_info, ens_info, nt=1)
+
     
-    #-- construct regular grid ; get spatial dimensions --
-    tmpfileN = sorted( glob.glob("%s/mem*/*%s*" % (dir_list[0], varList['thetao']) ) )
-    tmp = xr.open_dataset("%s" % tmpfileN[0])
-    #
-    [e2t, e1t] = [(tmp.nav_lat[1:, :]-tmp.nav_lat[:-1, :]).mean().data, \
-                  (tmp.nav_lon[:, 1:]-tmp.nav_lon[:, :-1]).mean().data]
-    longitude = np.arange(tmp.nav_lon.min(), tmp.nav_lon.max()+e1t, e1t)
-    latitude  = np.arange(tmp.nav_lat.min(), tmp.nav_lat.max()+e2t, e2t)
-    depth     = tmp.deptht.data
-    #
-    [nz, ny, nx] = [tmp.dims["deptht"], len(latitude), len(longitude)]
-    
-    #-- construct associated land/ocean mask --
-    print("-- Generate 3D land/ocean mask on regular grid --")
-    msk = xr.where(tmp.thetao.isel(time_counter=0) > 0, 1., 0.)
-    msk = eval("msk.stack(yx=('%s', '%s'))" % (varList['y'], varList['x']) )
-    msk_reg = np.zeros([nz, ny, nx])
-    for kkk in range(nz):
-        msk_reg[kkk, ...] = griddata((msk.nav_lon, msk.nav_lat), msk[kkk, :], \
-                                     (longitude[None, :], latitude[:, None]), method='linear')
-    msk_reg = np.where(msk_reg > 0.999, 1., np.nan)
-    
-    #-- attributes --
-    attrs_his = tmp.attrs['history']
-    
-    #-------------------
-    # Loop on each month
-    #-------------------
-    for idir in dir_list:
-        print("-- Convert month: %s/" % idir.replace(dir_in, ""))
+    #-- define CMEMS-type variable names --
+    varList = ["zos", "thetao", "so", "uo", "vo"]
+
+    #--------------
+    # Loop on dates
+    #--------------
+    for idate in date_list:
+        idate = idate.strftime("%Y%m%d")
+        print("-- Convert date: %s" % idate )
         
-        #- get ensemble and time dims -
-        nmem = len(glob.glob("%s/mem*" % idir))
-        
-        #- initiate xarray dataset -
-        if ens: ds = create_dataset(depth, latitude, longitude, attrs_his, nmem=nmem, nt=1)
-    
-        #----------------------------
-        # Interpolate on regular grid
-        #----------------------------
-        
-        #-- get number of time frame and file extension associated with their dates --
-        tmplist = sorted(glob.glob("%s/mem000/*%s*.nc" % (idir, varList['thetao'])))
-        nfile   = len(tmplist)
-        
-        for ttt in range(nfile):
-            ext = tmplist[ttt][-20:]
-            print("time period: %s" % (ext[:-3]) )
-            
-            for imem in range(nmem):
-                print("== member %03.i ==" % (imem) )
-                if not ens: ds = create_dataset(depth, latitude, longitude, attrs_his, nmem=0, nt=1)
-                
-                #-- zos --
-                #print("    - zos")
-                # load 
-                tmpda = eval("xr.open_mfdataset('%s/mem%03.i/*%s*%s').%s" % \
-                             (idir, imem, varList['zos'], ext, varList['zos']) )
-                # extract time info
-                if ens:
-                    if imem == 0: 
-                        ds["time"] = eval("tmpda.%s.data" % (varList['time']) )
-                        ds.time.attrs = dict(time_origin=eval("tmpda.%s.attrs['time_origin']" % varList['time']))
+        #-------------------------
+        # Loop on ensemble members (break if not an ensemble)
+        #-------------------------
+        if ens_info["ens_out"]:
+            #- cleanup dataset -
+            for ivar in varList:
+                ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
+
+        for imem in range(nmem):
+            print('---- Ensemble member: %03.i' % (ens_info["number"][imem]) )
+            if not ens_info["ens_out"]:
+                #- cleanup dataset -
+                for ivar in varList:
+                    ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
+
+            #------------------
+            # Loop on variables 
+            #------------------
+            for ivar in varList:
+
+                print('------ Interpolate variable: %s' % ivar)
+
+                #- file name -
+                if ens_info["ens_in"]:
+                    tmpfile = str("%s/%03.i*%s*%s-%s*.nc" % (dir_info["dir_in"], ens_info["number"][imem], var_info[ivar], idate, idate) )
                 else:
-                    ds["time"] = eval("tmpda.%s.data" % (varList['time']) )
-                    ds.time.attrs = dict(time_origin=eval("tmpda.%s.attrs['time_origin']" % varList['time']))
-                # prepare for interpoaltion (remove time dimension, stack on the hz, remove NaNs)
-                tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
-                             (varList['time'], varList['y'], varList['x']))
-                # interpolate
-                tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (longitude[None, :], latitude[:, None]), method='linear')" % \
-                              (varList['longitude'], varList['latitude']))
-                # apply mask and write into the new dataset
-                if ens:
-                    ds["zos"][imem, 0, ...] = (tmpvar * msk_reg[0, ...])
-                else:
-                    ds["zos"][0, ...]       = (tmpvar * msk_reg[0, ...])
-                
-                #-- thetao --
-                #print("    - thetao")
-                for kkk in range(nz):
-                    tmpda = eval("xr.open_mfdataset('%s/mem%03.i/*%s*%s').%s.isel(%s=0, %s=kkk).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
-                                ( idir, imem, varList['thetao'], ext, varList['thetao'], \
-                                  varList['time'], varList['z'], varList['y'], varList['x']) )
-                    if tmpda.size != 0:
-                        tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (longitude[None, :], latitude[:, None]), method='linear')" % (varList['longitude'], varList['latitude']) )
-                        if ens: 
-                            ds["thetao"][imem, 0, kkk,  ...] = (tmpvar * msk_reg[kkk, ...])
-                        else:
-                            ds["thetao"][0, kkk,  ...]       = (tmpvar * msk_reg[kkk, ...])
+                    tmpfile = str("%s/*%s*%s-%s*.nc"      % (dir_info["dir_in"], var_info[ivar], idate, idate) )
+    
+                #------------------------
+                # Loop on vertical levels (break for ssh)
+                #------------------------
+                for kkk in range(ds.dims['depth']):
+                    
+                    #- open file and select depth if not SSH -
+                    if ivar == "zos":
+                        tmpda = eval("xr.open_mfdataset('%s').%s" % (tmpfile, ivar) )
+                    elif ivar == "uo":
+                        tmpda = eval("xr.open_mfdataset('%s').%s.isel(%s=%i)" % (tmpfile, ivar, var_info['z_u'], kkk) )
+                    elif ivar == "vo":      
+                        tmpda = eval("xr.open_mfdataset('%s').%s.isel(%s=%i)" % (tmpfile, ivar, var_info['z_v'], kkk) )
                     else:
+                        tmpda = eval("xr.open_mfdataset('%s').%s.isel(%s=%i)" % (tmpfile, ivar, var_info['z'], kkk) )
+
+                    #- extract time dimension from SSH -
+                    if ivar == "zos": 
+                        ds["time"] = eval("tmpda.%s.data" % (var_info['time']) )
+                        ds.time.attrs = dict(time_origin=eval("tmpda.%s.attrs['time_origin']" % var_info['time']))
+
+                    #- prepare for interpolation (remove time dimension and stack on the horizontal) -
+                    if ivar == "uo":
+                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
+                                     (var_info['time'], var_info['y_u'], var_info['x_u']) )
+                    elif ivar == "vo":
+                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
+                                     (var_info['time'], var_info['y_v'], var_info['x_v']) )
+                    else:
+                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
+                                     (var_info['time'], var_info['y'], var_info['x']) )
+
+                    #- break kkk loop if all data are on land -
+                    if tmpda.size == 0.:
                         break
-                        
-                #-- so --
-                #print("    - so")
-                for kkk in range(nz):
-                    tmpda = eval("xr.open_mfdataset('%s/mem%03.i/*%s*%s').%s.isel(%s=0, %s=kkk).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
-                                ( idir, imem, varList['so'], ext, varList['so'], \
-                                  varList['time'], varList['z'], varList['y'], varList['x']) )
-                    if tmpda.size != 0:
-                        tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (longitude[None, :], latitude[:, None]), method='linear')" % (varList['longitude'], varList['latitude']) ) 
-                        if ens:
-                            ds["so"][imem, 0, kkk,  ...] = (tmpvar * msk_reg[kkk, ...])
+                    
+                    #- interpolate -
+                    tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (ds.longitude.data[None, :], ds.latitude.data[:, None]), method='linear')" % \
+                                  (var_info['longitude'], var_info['latitude']))
+
+                    #- apply land/ocean mask -
+                    tmpvar *= ds.mask[kkk, ...]
+ 
+                    #- write into CMEMS-like dataset -
+                    if ens_info['ens_out']:
+                        if ivar == "zos": 
+                            ds[ivar][imem, 0,  ...]      = tmpvar
                         else:
-                            ds["so"][0, kkk,  ...]       = (tmpvar * msk_reg[kkk, ...])
+                            ds[ivar][imem, 0, kkk,  ...] = tmpvar
                     else:
-                        break
-                        
-                #-- uo --
-                #print("    - uo")
-                for kkk in range(nz):
-                    tmpda = eval("xr.open_mfdataset('%s/mem%03.i/*%s*%s').%s.isel(%s=0, %s=kkk).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
-                                ( idir, imem, varList['uo'], ext, varList['uo'], \
-                                  varList['time'], varList['z_u'], varList['y_u'], varList['x_u']) )
-                    if tmpda.size != 0:
-                        tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (longitude[None, :], latitude[:, None]), method='linear')" % (varList['longitude'], varList['latitude']) )
-                        if ens: 
-                            ds["uo"][imem, 0, kkk,  ...] = (tmpvar * msk_reg[kkk, ...])
+                        if ivar == "zos":
+                            ds[ivar][0, ...]       = tmpvar 
                         else:
-                            ds["uo"][0, kkk,  ...]       = (tmpvar * msk_reg[kkk, ...])
-                    else:
-                        break
-                        
-                #-- vo --
-                #print("    - vo")
-                for kkk in range(nz):
-                    tmpda = eval("xr.open_mfdataset('%s/mem%03.i/*%s*%s').%s.isel(%s=0, %s=kkk).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
-                                ( idir, imem, varList['vo'], ext, varList['vo'], \
-                                  varList['time'], varList['z_v'], varList['y_v'], varList['x_v']) )
-                    if tmpda.size != 0:
-                        tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (longitude[None, :], latitude[:, None]), method='linear')" % (varList['longitude'], varList['latitude']) )
-                        if ens: 
-                            ds["vo"][imem, 0, kkk,  ...] = (tmpvar * msk_reg[kkk, ...])
-                        else:
-                            ds["vo"][0, kkk,  ...]       = (tmpvar * msk_reg[kkk, ...])
-                    else:
+                            ds[ivar][0, kkk,  ...] = tmpvar 
+
+                    #- break loop if SSH -
+                    if ivar == "zos":
                         break
 
-                if not ens:
-                    #-- write to netcdf --
-                    print("(%s) -- write to netcdf: %s/mem%03.i/%03.i%s_%s" % \
-                          (datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), idir, imem, imem, fileOUT, ext))
-                    #print(str('%s/ens025-reana-daily_%s' % (idir, ext) ))
-                    ds.to_netcdf(path=str('%s/mem%03.i/%03.i%s_%s' % \
-                                          (idir, imem, imem, fileOUT, ext) ), engine='netcdf4', compute=False)
-                
-        
-            if ens:
+                    #-- END LOOP ON VERTICAL LEVELS --
+
+                #-- END LOOP ON VARIABLES --
+
+            #-- save one netcdf file per ensemble member --
+            if not ens_info["ens_out"]:
+                if ens_info["ens_in"]:
+                     tmpout = str("%s/%03.i%s_%s-%s.nc" % (dir_info["dir_out"], ens_info["number"][imem], dir_info["fileN"], idate, idate) )
+                else:
+                     tmpout = str("%s/%s_%s-%s.nc"      % (dir_info["dir_out"], dir_info["fileN"], idate, idate) )
                 #-- write to netcdf --
-                print("(%s) -- write to netcdf: %s/%s_%s" % \
-                      (datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), idir, fileOUT, ext))
-                #print(str('%s/ens025-reana-daily_%s' % (idir, ext) ))
-                ds.to_netcdf(path=str('%s/%s_%s' % (idir, fileOUT, ext) ), engine='netcdf4', compute=False)
-            
-    #-- The end! --
+                print("(%s) -- write to netcdf: %s" % (datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), tmpout) )
+                ds.to_netcdf(path=tmpout, engine='netcdf4', compute=False)
+
+            #-- break loop if not an ensemble --
+            if not ens_info["ens_in"]:
+                break
+
+            #-- END LOOP ON ENSEMBLE MEMBERS --
+           
+        if ens_info["ens_out"]:
+            tmpout = str("%s/%s_%s-%s.nc" % (dir_in, dir_info["fileN"], idate, idate) )
+            #-- write to netcdf --
+            print("(%s) -- write to netcdf: %s" % (datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), tmpout) )
+            ds.to_netcdf(path=tmpout, engine='netcdf4', compute=False)
+ 
     return

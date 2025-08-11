@@ -1,5 +1,6 @@
-# FOCCUS
-Softwares developped and used at Shom in the context of the Horizon Europe FOCCUS project (https://foccus-project.eu/).
+# Description
+Softwares developped and used at Shom in the context of the Horizon Europe FOCCUS project (https://foccus-project.eu/) to convert model output from native NEMO grid to a CMEMS-like format, including a capabilities to deal with ensemble simulation model outputs.
+
 
 # Installation
 
@@ -7,10 +8,14 @@ Softwares developped and used at Shom in the context of the Horizon Europe FOCCU
 python setup.py install --user
 ```
 
-# Convert GLO4ens native model outputs to CMEMS-type data structure
+# Test case: the global $\nicefrac{1}{4}^{\circ}$ ensemble simulation GLO4ens
 
-- Retrieve GLO4ens model output on the native NEMO grid, with one file per ensemble member, per day and per 3D variables. 2D variables, including SSH, were all combined in one file, the script ```extract_zos.sh``` is used to extract it (following the data structure below). 
+## Step-by-step procedure
 
-- From original ```.tar``` files, the data was first organized follawing this convention:```/YOUR_LOCAL_DIR/YYYY/MM/memMMM/*.nc```
+- Retrieve GLO4ens model output on natice NEMO grid from Mercator Ocean International.
 
-- ```convert_as_cmems.ipynb``` provide an use example to convert GLO4ens from native NEMO to CMEMS-type data format.
+- Extract SSH field from 2D surface variables with ```extract_zos.sh```.
+
+- Define various parameters in ```params.json``` file, including dates, ensemble and variable name information (see ```convert_to_cmems_type``` description for further informations).
+
+- ```convert_GLO4ens.ipynb``` provides an use example of such convertion.

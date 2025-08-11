@@ -1,0 +1,40 @@
+{
+  "dir_info": {
+    "dir_in": "/home2/scratch/qjamet/data/convert_cmems/",
+    "dir_out": "/home2/scratch/qjamet/data/convert_cmems/",
+    "fileN": "ens025-reana-daily"
+  },
+  "date_info": {
+    "yr_ini": 2017, 
+    "mth_ini": 12, 
+    "day_ini": 27, 
+    "yr_end": 2019, 
+    "mth_end": 4, 
+    "day_end": 16,
+    "step": 1
+  },
+  "ens_info": {
+    "ens_in": true, 
+    "number": [0], 
+    "ens_out": false
+  },
+  "var_info": {
+    "thetao": "thetao", 
+    "so": "so", 
+    "uo": "uo",
+    "vo": "vo", 
+    "zos": "zos", 
+    "time": "time_counter", 
+    "longitude": "nav_lon", 
+    "latitude": "nav_lat",
+    "x": "x", 
+    "y": "y",
+    "z": "deptht",
+    "x_u": "x",
+    "y_u": "y",
+    "z_u": "depthu",
+    "x_v": "x",
+    "y_v": "y",
+    "z_v": "depthv"
+  }
+}
