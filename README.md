@@ -16,6 +16,6 @@ python setup.py install --user
 
 - Extract SSH field from 2D surface variables with ```extract_zos.sh```.
 
-- Define various parameters in ```params.json``` file, including dates, ensemble and variable name information (see ```convert_to_cmems_type``` description for further informations).
+- Define various parameters in ```params.json``` file, including dates, ensemble and variable name informations (see ```convert_to_cmems_type``` description for further informations).
 
 - ```convert_GLO4ens.ipynb``` provides an use example of such convertion.
