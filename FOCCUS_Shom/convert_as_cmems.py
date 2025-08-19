@@ -97,13 +97,6 @@ def create_dataset(dir_info, var_info, ens_info, nt=1):
         nmem = len(ens_info["number"])
 
     if ens_info["ens_out"]:
-        #variables=dict(
-        #        zos=(["number", "time", "latitude", "longitude"], np.zeros([nmem, nt, ny, nx])),
-        #        uo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-        #        vo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-        #        thetao=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-        #        so=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-        #    )
         variables=dict(
                 zos=(["number", "time", "latitude", "longitude"], np.full((nmem, nt, ny, nx), np.nan) ),
                 uo=(["number", "time", "depth", "latitude", "longitude"], np.full((nmem, nt, nz, ny, nx), np.nan) ),
@@ -119,13 +112,6 @@ def create_dataset(dir_info, var_info, ens_info, nt=1):
              number=ens_info["number"].astype('int16'),
          )
     else:
-        #variables=dict(
-        #        zos=(["time", "latitude", "longitude"], np.zeros([nt, ny, nx])),
-        #        uo=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-        #        vo=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-        #        thetao=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-        #        so=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-        #    )
         variables=dict(
                 zos=(["time", "latitude", "longitude"], np.full((nt, ny, nx), np.nan) ),
                 uo=(["time", "depth", "latitude", "longitude"], np.full((nt, nz, ny, nx), np.nan) ),
@@ -219,14 +205,13 @@ def create_dataset(dir_info, var_info, ens_info, nt=1):
 
 
 ################################
-#def convert_to_cmems_type(dir_info, date_info=None, ens_info=dict({"ens_in":False, "ens_out":False, "number": None}), var_info=None):
 def convert_to_cmems_type(filename):
     '''
-    Reorganize and interpolate input dataset to a CMEMS-like dataset, i.e. all variables are intrpolated on a regular, non-staggered latitude/longitude grid with conventional variable names.
+    Reorganize and interpolate input dataset to a CMEMS-like dataset, i.e. all variables are interpolated on a regular, non-staggered latitude/longitude grid with conventional variable names.
     This script assumes an input dataset with one file per variables (i.e. ssh, temperature, salinity, zonal and meridional velocity), per model output dump (i.e. no time dimension in the original dataset), and in the case of ensemble simulations one file per ensemble member.
-    Input file names should be in form 'XXXnyname*VARIABLE*_YYYYMMDD-YYYYMMDD*.nc', with XXX the ensemble member number, VARIABLE the name of the variable (see var_info), YYYYMMDD the date.
+    Input file names should be in form 'XXXmyname*VARIABLE*_YYYYMMDD-YYYYMMDD*.nc', with XXX the ensemble member number, VARIABLE the name of the variable (see var_info), YYYYMMDD the date.
     In case of ensemble, the resulting CMEMS-like output dataset can either be saved with one netcdf file per ensemble member (i.e. ens_info["ens_out"] == False, default), 
-    or one netcdf file with all ensemble members (i.e. ens_info["ens_out"] == True) with 'number' as the 
+    or one netcdf file with all ensemble members (i.e. ens_info["ens_out"] == True) with 'number' as the ensemble dimension.
     
     Input: 
     - filename: J[A]SON file containing the following parameters: 
@@ -263,8 +248,6 @@ def convert_to_cmems_type(filename):
                                 "x_v": "",
                                 "y_v": "",
                                 "z_v": "",})
-
-    Note: As for now (08/08/2025), uo and vo coordinates are referred to with the same name (nav_lon, nav_lat) than tracer. Opening with xr.open_mfdataset all variables at once require overriding coordinates, resulting in a loss of information needed for interpolation. Each variables are thus treated separately.
     '''
  
     #-- Read parameters from json file --
@@ -324,7 +307,6 @@ def convert_to_cmems_type(filename):
         if ens_info["ens_out"]:
             #- cleanup dataset -
             for ivar in varList:
-                #ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
                 ds[ivar] = eval("(ds.%s.dims, np.full(ds.%s.shape, np.nan) )" % (ivar, ivar) )
                            
         for imem in range(nmem):
@@ -332,7 +314,6 @@ def convert_to_cmems_type(filename):
             if not ens_info["ens_out"]:
                 #- cleanup dataset -
                 for ivar in varList:
-                    #ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
                     ds[ivar] = eval("(ds.%s.dims, np.full(ds.%s.shape, np.nan) )" % (ivar, ivar) )
 
             #------------------
