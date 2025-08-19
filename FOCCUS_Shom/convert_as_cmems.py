@@ -97,12 +97,19 @@ def create_dataset(dir_info, var_info, ens_info, nt=1):
         nmem = len(ens_info["number"])
 
     if ens_info["ens_out"]:
+        #variables=dict(
+        #        zos=(["number", "time", "latitude", "longitude"], np.zeros([nmem, nt, ny, nx])),
+        #        uo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
+        #        vo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
+        #        thetao=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
+        #        so=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
+        #    )
         variables=dict(
-                zos=(["number", "time", "latitude", "longitude"], np.zeros([nmem, nt, ny, nx])),
-                uo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-                vo=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-                thetao=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
-                so=(["number", "time", "depth", "latitude", "longitude"], np.zeros([nmem, nt, nz, ny, nx])),
+                zos=(["number", "time", "latitude", "longitude"], np.full((nmem, nt, ny, nx), np.nan) ),
+                uo=(["number", "time", "depth", "latitude", "longitude"], np.full((nmem, nt, nz, ny, nx), np.nan) ),
+                vo=(["number", "time", "depth", "latitude", "longitude"], np.full((nmem, nt, nz, ny, nx), np.nan) ),
+                thetao=(["number", "time", "depth", "latitude", "longitude"], np.full((nmem, nt, nz, ny, nx), np.nan) ),
+                so=(["number", "time", "depth", "latitude", "longitude"], np.full((nmem, nt, nz, ny, nx), np.nan) ),
             )
         coordinates=dict(
              depth=depth.astype('float'),
@@ -112,12 +119,19 @@ def create_dataset(dir_info, var_info, ens_info, nt=1):
              number=ens_info["number"].astype('int16'),
          )
     else:
+        #variables=dict(
+        #        zos=(["time", "latitude", "longitude"], np.zeros([nt, ny, nx])),
+        #        uo=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
+        #        vo=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
+        #        thetao=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
+        #        so=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
+        #    )
         variables=dict(
-                zos=(["time", "latitude", "longitude"], np.zeros([nt, ny, nx])),
-                uo=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-                vo=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-                thetao=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
-                so=(["time", "depth", "latitude", "longitude"], np.zeros([nt, nz, ny, nx])),
+                zos=(["time", "latitude", "longitude"], np.full((nt, ny, nx), np.nan) ),
+                uo=(["time", "depth", "latitude", "longitude"], np.full((nt, nz, ny, nx), np.nan) ),
+                vo=(["time", "depth", "latitude", "longitude"], np.full((nt, nz, ny, nx), np.nan) ),
+                thetao=(["time", "depth", "latitude", "longitude"], np.full((nt, nz, ny, nx), np.nan) ),
+                so=(["time", "depth", "latitude", "longitude"], np.full((nt, nz, ny, nx), np.nan) ),
             )
         coordinates=dict(
              depth=depth.astype('float'),
@@ -310,14 +324,16 @@ def convert_to_cmems_type(filename):
         if ens_info["ens_out"]:
             #- cleanup dataset -
             for ivar in varList:
-                ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
-
+                #ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
+                ds[ivar] = eval("(ds.%s.dims, np.full(ds.%s.shape, np.nan) )" % (ivar, ivar) )
+                           
         for imem in range(nmem):
             print('---- Ensemble member: %03.i' % (ens_info["number"][imem]) )
             if not ens_info["ens_out"]:
                 #- cleanup dataset -
                 for ivar in varList:
-                    ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
+                    #ds[ivar] = eval("xr.zeros_like(ds.%s)" % ivar)
+                    ds[ivar] = eval("(ds.%s.dims, np.full(ds.%s.shape, np.nan) )" % (ivar, ivar) )
 
             #------------------
             # Loop on variables 
@@ -354,22 +370,26 @@ def convert_to_cmems_type(filename):
 
                     #- prepare for interpolation (remove time dimension and stack on the horizontal) -
                     if ivar == "uo":
-                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
+                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).fillna(0.)" % \
                                      (var_info['time'], var_info['y_u'], var_info['x_u']) )
                     elif ivar == "vo":
-                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
+                        tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).fillna(0.)" % \
                                      (var_info['time'], var_info['y_v'], var_info['x_v']) )
                     else:
                         tmpda = eval("tmpda.isel(%s=0).stack(yx=('%s', '%s')).dropna(dim='yx', how='any')" % \
                                      (var_info['time'], var_info['y'], var_info['x']) )
 
-                    #- break kkk loop if all data are on land -
+                    #- break kkk loop if deeper than depest level (for tracers only) -
                     if tmpda.size == 0.:
                         break
                     
                     #- interpolate -
-                    tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (ds.longitude.data[None, :], ds.latitude.data[:, None]), method='linear')" % \
-                                  (var_info['longitude'], var_info['latitude']))
+                    if ivar == 'uo' or ivar == 'vo':
+                       tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (ds.longitude.data[None, :], ds.latitude.data[:, None]), method='linear')" % \
+                                     (var_info['longitude'], var_info['latitude']))
+                    else:
+                       tmpvar = eval("griddata((tmpda.%s, tmpda.%s), tmpda, (ds.longitude.data[None, :], ds.latitude.data[:, None]), method='nearest')" % \
+                                     (var_info['longitude'], var_info['latitude']))
 
                     #- apply land/ocean mask -
                     tmpvar *= ds.mask[kkk, ...]
